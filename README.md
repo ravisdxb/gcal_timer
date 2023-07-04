@@ -1,2 +1,2 @@
 # gcal_timer
-Repositor for gcal_timer
+Repository for gcal_timer
