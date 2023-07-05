@@ -1,3 +1,4 @@
+<pre>
 # gcal_timer
 Repository for gcal_timer
 ----------------------------------------------
@@ -31,3 +32,4 @@ config/appdaemon/lib (new directory)
 
 config/www (new directory)
  entire contents of www directory
+</pre>
