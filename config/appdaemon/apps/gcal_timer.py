@@ -1,6 +1,5 @@
 # gcal_timer.py
 # Google Calendar events with Timer
-# Uses webpage card on HA front-end
 # ravisdxb@gmail.com
 
 import appdaemon.plugins.hass.hassapi as hass
@@ -18,9 +17,16 @@ from googleapiclient.errors import HttpError
 class GCalTimer(hass.Hass):
     def initialize(self):
         self.tz_offset=self.get_tz_offset()
-        # refresh calendars every hour
-        self.run_hourly(self.hourly_update,datetime.time(0,0,0))
-        # refresh calendars when input_boolean is triggered
+        # refresh calendar every x minutes
+        interval_minutes=self.args['REFRESH_MINUTES']
+        interval_seconds=interval_minutes*60
+        now=datetime.datetime.now()
+        remaining_minutes=interval_minutes-(now.minute%interval_minutes)
+        adjusted=now+datetime.timedelta(minutes=remaining_minutes)
+        start=adjusted.replace(second=0,microsecond=0)
+        self.run_every(self.auto_update,start,interval_seconds)
+        #self.run_hourly(self.hourly_update,datetime.time(0,0,0))
+        # refresh calendar when input_boolean is triggered
         self.trigger=self.args['TRIGGER']
         self.listen_state(self.manual_update, self.trigger, new='on')
 
@@ -37,27 +43,33 @@ class GCalTimer(hass.Hass):
         tz_str+="%02d:%02d"%(offset_h,offset_m)
         return tz_str
 
-    def hourly_update(self, kwargs):
+    def auto_update(self, kwargs):
         self.turn_on(self.args['TRIGGER'])
 
     def manual_update(self, entity, attribute, old, new, kwargs):
-        self.get_events(self)
+        for user in self.args['USERS']:
+            self.user=user
+            self.get_events(self)
+            self.log(f'Google Calendar Updated for {self.user}')
         self.turn_off(self.args['TRIGGER'])
-        self.log('Google Calendar Updated')
 
     def get_events(self, kwargs):
+        self.token_file='/config/appdaemon/gcal/'+self.user.replace(' ','_')+'_token.json'
+        self.creds_file='/config/appdaemon/gcal/'+self.user.replace(' ','_')+'_credentials.json'
+        self.html_small_file='/config/www/gcal_timer/'+self.user.replace(' ','_')+'_gcal_timer_small.html'
+        self.html_big_file='/config/www/gcal_timer/'+self.user.replace(' ','_')+'_gcal_timer_big.html'
         # from quick start guide
         SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
         creds = None
-        if os.path.exists('/config/appdaemon/gcal/token.json'):
-            creds=Credentials.from_authorized_user_file('/config/appdaemon/gcal/token.json',SCOPES)
+        if os.path.exists(self.token_file):
+            creds=Credentials.from_authorized_user_file(self.token_file,SCOPES)
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                flow = InstalledAppFlow.from_client_secrets_file('/config/appdaemon/gcal/credentials.json', SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(self.creds_file, SCOPES)
                 creds = flow.run_local_server(port=0)
-            with open('/config/appdaemon/gcal/token.json', 'w') as token:
+            with open(self.token_file, 'w') as token:
                 token.write(creds.to_json())
 
         service = build('calendar', 'v3', credentials=creds)
@@ -140,17 +152,17 @@ class GCalTimer(hass.Hass):
                     var dur_hours = Math.floor((dur % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
                     var dur_minutes = Math.floor((dur % (1000 * 60 * 60)) / (1000 * 60));
                     var dur_seconds = Math.floor((dur % (1000 * 60)) / 1000);
-                    var dur_str='(';
+                    var dur_str='_';
                     if(dur_days>0) dur_str+=dur_days+'<span class=small>d</span>';
                     if(dur_hours>0){
-                        if(dur_str>'(') dur_str+=' ';
+                        if(dur_str>'_') dur_str+=' ';
                         dur_str+=dur_hours+'<span class=small>h</span>';
                     }
                     if(dur_minutes>0){
-                        if(dur_str>'(') dur_str+=' ';
+                        if(dur_str>'_') dur_str+=' ';
                         dur_str+=dur_minutes+'<span class=small>m</span>';
                     }
-                    dur_str+=')';
+                    dur_str=dur_str.substring(1);
                     ev_dur[i]=dur_str;
                     tr="<tr valign=top id=ev_"+i+" bgcolor=whitesmoke>";
                     tr+="<td id=progress_"+i+"><b>"+ev_name[i]+"</b><div class=small><b>";
@@ -164,14 +176,14 @@ class GCalTimer(hass.Hass):
                         } else {
                             tr+=moment(end_date).format(x_datetime_format);
                         }
-                        tr+=' '+dur_str;
+                        tr+=' ('+dur_str+')';
                     }
                     tr+="</b></div>";
                     if(ev_loc[i]!="_NO_LOC_"){
                         if(ev_loc[i].length>40){
-                            tr+="<div>Loc: "+ev_loc[i].substring(0,40)+"</div>";
+                            tr+="<div>"+ev_loc[i].substring(0,40)+"</div>";
                         } else {
-                            tr+="<div>Loc: "+ev_loc[i]+"</div>";
+                            tr+="<div>"+ev_loc[i]+"</div>";
                         }
                     }
                     tr+='</td>';
@@ -355,9 +367,9 @@ class GCalTimer(hass.Hass):
     </body>
 </html>
         """
-            f=open('/config/www/gcal_timer/gcal_timer_big.html','w')
+            f=open(self.html_big_file,'w')
             f.write(html_str + style_big_str + body_str)
             f.close()
-            f=open('/config/www/gcal_timer/gcal_timer_small.html','w')
+            f=open(self.html_small_file,'w')
             f.write(html_str + style_small_str + body_str)
             f.close()
